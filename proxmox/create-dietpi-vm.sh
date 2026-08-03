@@ -4,13 +4,14 @@
 #
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/mews-se/dietpi-factory/main/proxmox/create-dietpi-vm.sh)"
 #
-# The profile is injected into the disk image before the first boot, so the
-# VM sets itself up unattended. Pass a factory.sh profile directory as first
-# argument (or PROFILE_DIR) to use it instead of the embedded defaults.
-# ASSUME_DEFAULTS=1 skips all dialogs.
+# The profile is injected into a working copy of the disk image before the
+# first boot, so the VM sets itself up unattended. Pass a factory.sh profile
+# directory as first argument (or PROFILE_DIR) to use it instead of the
+# embedded defaults. ASSUME_DEFAULTS=1 skips all dialogs.
 set -euo pipefail
 
 BASE_URL=https://dietpi.com/downloads/images
+CACHE=/var/cache/dietpi-factory
 PROFILE_DIR=${PROFILE_DIR:-${1:-}}
 ASSUME_DEFAULTS=${ASSUME_DEFAULTS:-0}
 
@@ -26,6 +27,11 @@ ask() {
     whiptail --backtitle "dietpi-factory" --title "$1" --inputbox "$2" 10 60 "$3" 3>&1 1>&2 2>&3
 }
 
+require_uint() {
+    case $2 in ''|*[!0-9]*|0[0-9]*) echo "Error: $1 '$2' is not a plain number." >&2; exit 1 ;; esac
+    [ "$2" -ge "$3" ] && [ "$2" -le "$4" ] || { echo "Error: $1 must be between $3 and $4." >&2; exit 1; }
+}
+
 VMID=$(ask "VM ID" "VM ID:" "$(pvesh get /cluster/nextid)")
 VM_NAME=$(ask "Name" "VM name:" "dietpi")
 CORES=$(ask "CPU" "Number of cores:" "2")
@@ -35,52 +41,92 @@ BRIDGE=$(ask "Network" "Bridge:" "vmbr0")
 DISTRO=$(ask "Distro" "Debian release (Bookworm/Trixie/Forky):" "Trixie")
 FIRMWARE=$(ask "Firmware" "Firmware (bios/uefi):" "bios")
 
+require_uint "VM ID" "$VMID" 100 999999999
+require_uint "cores" "$CORES" 1 256
+require_uint "RAM" "$RAM" 128 4194304
+require_uint "disk size" "$DISK" 1 65536
+[[ $VM_NAME =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] && [ ${#VM_NAME} -le 63 ] || { echo "Error: invalid VM name '$VM_NAME'." >&2; exit 1; }
+
 if [ "$ASSUME_DEFAULTS" = 1 ]; then
-    # the storage with the most free space
-    STORAGE=$(pvesm status --content images | awk 'NR>1' | sort -k6 -n | tail -1 | awk '{print $1}')
+    # the active storage with the most free space
+    STORAGE=$(pvesm status --content images | awk 'NR>1 && $3=="active"' | sort -k6 -n | tail -1 | awk '{print $1}')
 else
     STORAGE_OPTS=()
-    while read -r name; do STORAGE_OPTS+=("$name" ""); done < <(pvesm status --content images | awk 'NR>1 {print $1}')
+    while read -r name; do STORAGE_OPTS+=("$name" ""); done < <(pvesm status --content images | awk 'NR>1 && $3=="active" {print $1}')
+    [ ${#STORAGE_OPTS[@]} -gt 0 ] || { echo "Error: no active storage with VM image support found." >&2; exit 1; }
     STORAGE=$(whiptail --backtitle "dietpi-factory" --title "Storage" \
         --menu "Storage for the VM disk:" 16 60 8 "${STORAGE_OPTS[@]}" 3>&1 1>&2 2>&3)
 fi
+[ -n "$STORAGE" ] || { echo "Error: no storage selected." >&2; exit 1; }
 
 case $FIRMWARE in
     [Uu]*) IMAGE=DietPi_Proxmox-UEFI-x86_64-${DISTRO}.qcow2.xz; UEFI=1 ;;
     *)     IMAGE=DietPi_Proxmox-x86_64-${DISTRO}.qcow2.xz; UEFI=0 ;;
 esac
-cd /var/tmp
-if [ ! -f "${IMAGE%.xz}" ]; then
-    echo "Downloading ${IMAGE}..."
-    curl -fLO "$BASE_URL/$IMAGE"
-    if curl -fsLO "$BASE_URL/$IMAGE.sha256" 2>/dev/null; then
-        sha256sum -c "$IMAGE.sha256"
-    fi
-    xz -dk "$IMAGE"
-fi
-QCOW2=/var/tmp/${IMAGE%.xz}
 
-##### Inject the profile into the image before first boot #####
+##### Base image cache, checksum gated and never modified #####
+mkdir -p "$CACHE"
+QCOW2=$CACHE/${IMAGE%.xz}
+exec 8>"$CACHE/.download.lock"
+flock 8
+if [ ! -f "$QCOW2" ]; then
+    echo "Downloading ${IMAGE}..."
+    rm -f "$CACHE/$IMAGE" "$CACHE/$IMAGE.sha256"
+    curl -fL -o "$CACHE/$IMAGE" "$BASE_URL/$IMAGE"
+    curl -fsL -o "$CACHE/$IMAGE.sha256" "$BASE_URL/$IMAGE.sha256"
+    ( cd "$CACHE" && sha256sum -c "$IMAGE.sha256" )
+    xz -dc "$CACHE/$IMAGE" > "$QCOW2.part"
+    mv "$QCOW2.part" "$QCOW2"
+fi
+exec 8>&-
+
+##### Inject the profile into a working copy of the image #####
 TMPD=$(mktemp -d)
 MNT=$TMPD/mnt
 mkdir -p "$MNT"
+# working copy on the same filesystem as the cache, reflinked where supported
+WORK=$CACHE/.work.$$.qcow2
+MOUNTED=0 NBD_CONNECTED=0 VM_CREATED=0 HANDOFF=0
+
+cleanup() {
+    set +e
+    [ "$MOUNTED" = 1 ] && umount "$MNT"
+    [ "$NBD_CONNECTED" = 1 ] && qemu-nbd --disconnect "$NBD" >/dev/null 2>&1
+    if [ "$VM_CREATED" = 1 ] && [ "$HANDOFF" = 0 ]; then
+        qm destroy "$VMID" --purge >/dev/null 2>&1
+    fi
+    rm -f "$WORK"
+    rm -rf "$TMPD"
+}
+trap cleanup EXIT
+
+cp --reflink=auto --sparse=always "$QCOW2" "$WORK"
 
 if [ -n "$PROFILE_DIR" ]; then
     cp "$PROFILE_DIR/dietpi.txt" "$TMPD/dietpi.txt"
     [ ! -r "$PROFILE_DIR/Automation_Custom_Script.sh" ] || cp "$PROFILE_DIR/Automation_Custom_Script.sh" "$TMPD/Automation_Custom_Script.sh"
 else
-    sed "s/__HOSTNAME__/${VM_NAME}/" > "$TMPD/dietpi.txt" <<'EOF'
+    cat > "$TMPD/dietpi.txt" <<'EOF'
 AUTO_SETUP_NET_ETHERNET_ENABLED=1
 AUTO_SETUP_NET_WIFI_ENABLED=0
 AUTO_SETUP_NET_USESTATIC=0
-AUTO_SETUP_NET_HOSTNAME=__HOSTNAME__
 AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=1
 AUTO_SETUP_AUTOSTART_TARGET_INDEX=0
 AUTO_SETUP_AUTOMATED=1
 AUTO_SETUP_GLOBAL_PASSWORD=dietpi
 EOF
+    echo "AUTO_SETUP_NET_HOSTNAME=$VM_NAME" >> "$TMPD/dietpi.txt"
 fi
 
+# validate the whole profile before touching anything
+mapfile -t PROFILE_LINES < <(grep -E '^[A-Z][A-Z0-9_]*=' "$TMPD/dietpi.txt" || true)
+[ ${#PROFILE_LINES[@]} -gt 0 ] || { echo "Error: the profile contains no valid KEY=value lines." >&2; exit 1; }
+BAD=$(grep -vE '^[A-Z][A-Z0-9_]*=|^#|^[[:space:]]*$' "$TMPD/dietpi.txt" || true)
+[ -z "$BAD" ] || { printf 'Error: invalid profile lines:\n%s\n' "$BAD" >&2; exit 1; }
+
+# serialize nbd allocation between concurrent runs
+exec 9>/var/lock/dietpi-factory-nbd
+flock 9
 modprobe nbd max_part=8
 NBD=
 for d in /sys/class/block/nbd[0-9]*; do
@@ -88,14 +134,8 @@ for d in /sys/class/block/nbd[0-9]*; do
 done
 [ -n "$NBD" ] || { echo "Error: no free nbd device." >&2; exit 1; }
 
-cleanup() {
-    mountpoint -q "$MNT" && umount "$MNT"
-    qemu-nbd --disconnect "$NBD" >/dev/null 2>&1
-    rm -rf "$TMPD"
-}
-trap cleanup EXIT
-
-qemu-nbd --connect="$NBD" "$QCOW2"
+qemu-nbd --connect="$NBD" "$WORK"
+NBD_CONNECTED=1
 partprobe "$NBD" 2>/dev/null
 sleep 1
 
@@ -103,49 +143,64 @@ shopt -s nullglob
 TARGET=
 for part in "$NBD"p* "$NBD"; do
     mount "$part" "$MNT" 2>/dev/null || continue
+    MOUNTED=1
     if [ -f "$MNT/dietpi.txt" ]; then TARGET=$MNT; break; fi
     if [ -f "$MNT/boot/dietpi.txt" ]; then TARGET=$MNT/boot; break; fi
     umount "$MNT"
+    MOUNTED=0
 done
 [ -n "$TARGET" ] || { echo "Error: no dietpi.txt found in the image." >&2; exit 1; }
 
-while IFS= read -r line; do
-    case $line in [A-Z]*=*) ;; *) continue ;; esac
+for line in "${PROFILE_LINES[@]}"; do
     key=${line%%=*}
     sed -i "/^${key}=/d;/^#${key}=/d" "$TARGET/dietpi.txt"
-done < "$TMPD/dietpi.txt"
-{ echo; grep "^[A-Z0-9_]*=" "$TMPD/dietpi.txt"; } >> "$TARGET/dietpi.txt"
+done
+{ echo; printf '%s\n' "${PROFILE_LINES[@]}"; } >> "$TARGET/dietpi.txt"
 [ ! -r "$TMPD/Automation_Custom_Script.sh" ] || cp "$TMPD/Automation_Custom_Script.sh" "$TARGET/Automation_Custom_Script.sh"
 
 umount "$MNT"
+MOUNTED=0
 qemu-nbd --disconnect "$NBD" >/dev/null
-trap - EXIT
-rm -rf "$TMPD"
+NBD_CONNECTED=0
+exec 9>&-
 
 ##### Create and start the VM #####
 echo "Creating VM ${VMID} (${VM_NAME})..."
 UEFI_ARGS=()
 # keys pre-enrolled, the images ship the signed Debian boot chain
-[ "$UEFI" = 0 ] || UEFI_ARGS=(--bios ovmf --efidisk0 "${STORAGE}:1,efitype=4m,pre-enrolled-keys=1")
-qm create "$VMID" \
+[ "$UEFI" = 0 ] || UEFI_ARGS=(--machine q35 --bios ovmf --efidisk0 "${STORAGE}:1,efitype=4m,pre-enrolled-keys=1")
+if ! qm create "$VMID" \
     --name "$VM_NAME" \
     --cores "$CORES" \
     --memory "$RAM" \
     --net0 "virtio,bridge=${BRIDGE}" \
     --scsihw virtio-scsi-pci \
-    --scsi0 "${STORAGE}:0,import-from=${QCOW2},discard=on,ssd=1" \
+    --scsi0 "${STORAGE}:0,import-from=${WORK},discard=on,ssd=1" \
     --boot order=scsi0 \
     --ostype l26 \
     --onboot 1 \
     "${UEFI_ARGS[@]}" \
     --description "<p align='center'><img src='https://dietpi.com/images/dietpi-logo_128x128.png' width='40'><br><strong>DietPi</strong><br><a href='https://dietpi.com/docs/'>Docs</a> - <a href='https://github.com/mews-se/dietpi-factory'>dietpi-factory</a></p>"
+then
+    # a partial create can leave a config behind, remove it if it is ours
+    qm destroy "$VMID" --purge >/dev/null 2>&1 || true
+    echo "Error: qm create failed." >&2
+    exit 1
+fi
+VM_CREATED=1
 
 # the image is 8 GiB virtual, only grow when a larger disk was requested
 CUR_BYTES=$(qemu-img info --output=json "$QCOW2" | sed -n 's/.*"virtual-size": *\([0-9]*\).*/\1/p')
 if [ "$(( DISK * 1024*1024*1024 ))" -gt "${CUR_BYTES:-0}" ]; then
     qm disk resize "$VMID" scsi0 "${DISK}G"
 fi
-qm start "$VMID"
+
+# from here the VM is handed over, keep it even if the start fails
+HANDOFF=1
+if ! qm start "$VMID"; then
+    echo "The VM was created but failed to start. Inspect with: qm config $VMID" >&2
+    exit 1
+fi
 
 echo
 echo "Done. VM ${VMID} finishes its DietPi first boot setup on its own."
