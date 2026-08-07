@@ -52,6 +52,11 @@ if ! command -v curl >/dev/null 2>&1; then
     apt-get install -y curl ca-certificates
 fi
 
+# pin the run to one resolved master commit so the installer script and its
+# GITBRANCH checkout cannot drift apart
+DIETPI_REF=$(resolve_dietpi_ref) || { echo "Error: could not resolve the DietPi master commit, check the network and retry." >&2; exit 1; }
+INSTALLER_URL=https://raw.githubusercontent.com/MichaIng/DietPi/$DIETPI_REF/.build/images/dietpi-installer
+
 TMPD=$(mktemp -d)
 trap 'rm -rf "$TMPD"' EXIT
 if [ -n "$PROFILE_DIR" ]; then
@@ -74,7 +79,9 @@ echo "Everything outside the base system is removed, including user home"
 echo "directories, and the SSH host keys are reset. A session as a normal"
 echo "user cannot log back in. After the reboot you log in as root with the"
 echo "profile password."
-if ! grep -q '^AUTO_SETUP_SSH_PUBKEY=' "$TMPD/dietpi.txt"; then
+# an empty AUTO_SETUP_SSH_PUBKEY= line must not silence the warning
+pubkey=$(sed -n 's/^AUTO_SETUP_SSH_PUBKEY=//p' "$TMPD/dietpi.txt" | head -1)
+if [ -z "$pubkey" ]; then
     echo
     echo "WARNING: the profile has no SSH public key. On a remote machine, make"
     echo "sure you know the profile password or you will be locked out."
@@ -97,6 +104,14 @@ GITOWNER=MichaIng GITBRANCH=$DIETPI_REF HW_MODEL=$HW_MODEL DISTRO_TARGET=$DISTRO
     IMAGE_CREATOR=mews_se PREIMAGE_INFO="$PRETTY_NAME" WIFI_REQUIRED=0 bash "$TMPD"/dietpi-installer
 rm -f "$TMPD"/dietpi-installer
 
+# dietpi-software initialises Dropbear as pre-installed although containers
+# never ship it, which makes the first run skip the SSH server.
+# Fixed upstream in dev (MichaIng/DietPi@4a26253): the installer now seeds
+# the state file itself, so only add the line while master still lacks it
+if [ "$HW_MODEL" = 75 ]; then
+    grep -q 'aSOFTWARE_INSTALL_STATE\[104\]=' /boot/dietpi/.installed 2>/dev/null || echo 'aSOFTWARE_INSTALL_STATE[104]=0' >> /boot/dietpi/.installed
+fi
+
 # the conversion can remove the network stack that was in use (ifupdown2,
 # netplan, cloud-init) and clears the APT lists, so make sure ifupdown and a
 # DHCP client are there for the reboot
@@ -118,7 +133,6 @@ done < "$TMPD/dietpi.txt"
 
 # install the profile key for root right away instead of waiting for the
 # first boot setup, so the machine stays reachable even if that setup fails
-pubkey=$(sed -n 's/^AUTO_SETUP_SSH_PUBKEY=//p' "$TMPD/dietpi.txt" | head -1)
 if [ -n "$pubkey" ]; then
     mkdir -p /root/.ssh
     chmod 700 /root/.ssh
