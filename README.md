@@ -51,7 +51,7 @@ Run as root on any Linux box:
 sudo scripts/bake-image.sh RPi5 profiles/myprofile
 ```
 
-The image argument is a name or search term matched against [dietpi.com/downloads/images](https://dietpi.com/downloads/images/), a URL or a local file. A partial match like `RPi5` opens a menu with the variants. The result lands in build/ as a ready-to-flash .img for dd or Etcher. The output is published atomically; when two bakes write the same output name, the last one finished wins.
+The image argument is a name or search term matched against [dietpi.com/downloads/images](https://dietpi.com/downloads/images/), a URL or a local file. A partial match like `RPi5` opens a menu with the variants. Downloads are cached and verified in /var/cache/dietpi-factory and reused across runs. The result lands in build/ as a ready-to-flash .img for dd or Etcher. The output is published atomically; when two bakes write the same output name, the last one finished wins.
 
 ## Convert an existing Debian system
 
@@ -86,7 +86,7 @@ A generic DietPi LXC script pair in community-scripts layout lives in the [Proxm
 
 DietPi reads /boot/dietpi.txt at first boot. With AUTO_SETUP_AUTOMATED=1 the whole setup runs unattended and /boot/Automation_Custom_Script.sh runs at the end when provided. See the [DietPi docs](https://dietpi.com/docs/usage/#how-to-do-an-automatic-base-installation-at-first-boot) and [dietpi.txt](https://github.com/MichaIng/DietPi/blob/master/dietpi.txt).
 
-A few things learned the hard way: dietpi-installer replaces dietpi.txt (the profile is merged in afterwards), it removes ifupdown2 without a replacement (ifupdown is reinstalled) and DISTRO_TARGET must be preset when there is no tty.
+A few things learned the hard way: dietpi-installer replaces dietpi.txt (the profile is merged in afterwards), it removes ifupdown2 without a replacement (ifupdown is reinstalled), DISTRO_TARGET must be preset when there is no tty, and the installer stamps the branch it was launched from as the permanent dietpi-update target - the scripts point it back at master afterwards, or updates would never arrive.
 
 ## Credits
 
