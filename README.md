@@ -51,7 +51,7 @@ Run as root on any Linux box:
 sudo scripts/bake-image.sh RPi5 profiles/myprofile
 ```
 
-The image argument is a name or search term matched against [dietpi.com/downloads/images](https://dietpi.com/downloads/images/), a URL or a local file. A partial match like `RPi5` opens a menu with the variants. The result lands in build/ as a ready-to-flash .img for dd or Etcher.
+The image argument is a name or search term matched against [dietpi.com/downloads/images](https://dietpi.com/downloads/images/), a URL or a local file. A partial match like `RPi5` opens a menu with the variants. The result lands in build/ as a ready-to-flash .img for dd or Etcher. The output is published atomically; when two bakes write the same output name, the last one finished wins.
 
 ## Convert an existing Debian system
 

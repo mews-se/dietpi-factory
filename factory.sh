@@ -143,11 +143,6 @@ mkdir -p "$OUTDIR"
     echo
     echo "AUTO_SETUP_AUTOMATED=1"
     echo "AUTO_SETUP_GLOBAL_PASSWORD=$PASSWORD"
-    if [ -n "$CUSTOM_SCRIPT" ]; then
-        echo "AUTO_SETUP_CUSTOM_SCRIPT_EXEC=1"
-    else
-        echo "AUTO_SETUP_CUSTOM_SCRIPT_EXEC=0"
-    fi
     echo
     [ -z "$SOFTWARE_IDS" ] || echo "AUTO_SETUP_INSTALL_SOFTWARE_ID=$SOFTWARE_IDS"
     [ -z "$APT_PACKAGES" ] || echo "AUTO_SETUP_APT_INSTALLS=$APT_PACKAGES"
