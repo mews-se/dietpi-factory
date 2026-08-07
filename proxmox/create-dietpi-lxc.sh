@@ -121,6 +121,13 @@ EOF
     echo "AUTO_SETUP_NET_HOSTNAME=$CT_HOSTNAME" >> "$TMPD/dietpi.txt"
 fi
 
+# a profile saved with Windows line endings would ride a stray \r into
+# every value, DietPi applies them verbatim
+if grep -q $'\r' "$TMPD/dietpi.txt"; then
+    echo "Error: the profile has Windows (CRLF) line endings, convert it with e.g. dos2unix." >&2
+    exit 1
+fi
+
 # upstream treats the key as an URL field and a bundled script runs on file
 # presence alone, hence drop a legacy boolean or refuse it without a script
 CSX=$(sed -n '/^[[:blank:]]*AUTO_SETUP_CUSTOM_SCRIPT_EXEC=/{s/^[^=]*=//p;q}' "$TMPD/dietpi.txt")
@@ -155,8 +162,13 @@ have_template() {
     list=$(pveam list "$TSTORE" 2>/dev/null | awk '{print $1}')
     grep -qx "$TSTORE:vztmpl/$TEMPLATE" <<< "$list"
 }
-exec 8>/var/lock/dietpi-factory-template
-flock 8
+# the lock lives in the root-owned cache dir with a timeout: a lock file in
+# the world-writable /var/lock can be held forever by any local user
+mkdir -p /var/cache/dietpi-factory
+chmod 700 /var/cache/dietpi-factory
+exec 8>/var/cache/dietpi-factory/.template.lock
+chmod 600 /var/cache/dietpi-factory/.template.lock
+flock -w 3600 8 || { echo "Error: timed out waiting for a concurrent template download." >&2; exit 1; }
 if ! have_template; then
     pveam download "$TSTORE" "$TEMPLATE" || have_template
 fi
@@ -195,6 +207,10 @@ DIETPI_REF=$(resolve_dietpi_ref) || DIETPI_REF=master
 pct exec "$CTID" -- bash -c "I=\$(mktemp) && curl -fsSL 'https://raw.githubusercontent.com/MichaIng/DietPi/${DIETPI_REF}/.build/images/dietpi-installer' -o \"\$I\" && \
     GITOWNER=MichaIng GITBRANCH=${DIETPI_REF} HW_MODEL=75 DISTRO_TARGET=${DISTRO_TARGET} IMAGE_CREATOR=mews_se \
     PREIMAGE_INFO='Debian LXC template' WIFI_REQUIRED=0 bash \"\$I\""
+
+# the installer stamps the pinned SHA as the permanent dietpi-update target,
+# which would freeze updates at this commit, point updates back at master
+pct exec "$CTID" -- sed -i 's/^DEV_GITBRANCH=.*/DEV_GITBRANCH=master/' /boot/dietpi.txt
 
 # dietpi-software initialises Dropbear as pre-installed although container
 # images never ship it, which makes the first run skip the SSH server.
