@@ -143,9 +143,10 @@ fi
 
 SSH_CHOICE=$(ask "SSH server" "SSH server (dropbear/openssh/none):" "dropbear")
 case $SSH_CHOICE in
+    [Dd]*) SSH_INDEX=-1 ;;
     [Oo]*) SSH_INDEX=-2 ;;
     [Nn]*) SSH_INDEX=0 ;;
-    *)     SSH_INDEX=-1 ;;
+    *) echo "Error: SSH server must be dropbear, openssh or none." >&2; exit 1 ;;
 esac
 
 DEFAULT_PUBKEY_FILE=""
@@ -172,6 +173,10 @@ fi
 PASSWORD=$(askpw "Password" "Global password (empty = dietpi, change after install!)")
 [ -n "$PASSWORD" ] || PASSWORD=dietpi
 SOFTWARE_IDS=$(ask "DietPi software" "dietpi-software IDs, space separated (see https://dietpi.com/docs/software/):" "")
+# a name instead of an ID would only fail in the first run on the machine
+for id in $SOFTWARE_IDS; do
+    [[ $id =~ ^[0-9]+$ ]] || { echo "Error: software ID '$id' is not a number, the IDs are listed at https://dietpi.com/docs/software/." >&2; exit 1; }
+done
 APT_PACKAGES=$(ask "APT packages" "Extra APT packages, space separated:" "")
 CUSTOM_SCRIPT=$(ask "Custom script" "Path to an own Automation_Custom_Script.sh (empty for none):" "")
 if [ -n "$CUSTOM_SCRIPT" ] && [ ! -r "$CUSTOM_SCRIPT" ]; then
