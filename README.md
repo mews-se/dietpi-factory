@@ -16,7 +16,7 @@ dietpi-factory sets up new [DietPi](https://dietpi.com/) machines unattended. De
 
 The wizard asks for hostname, network, SSH server and key, password, software picks and an optional own first boot script, and writes profiles/\<name\>/. Profiles can contain passwords and keys, so the directory is gitignored - copy it to wherever the deployment script runs.
 
-Every deployment script takes a profile directory as first argument (or the PROFILE_DIR variable). With the `bash -c` one liners the argument needs a placeholder in front, since the first word after the command becomes `$0`:
+Every deployment script takes a profile directory as first argument (second for bake-image.sh) or the PROFILE_DIR variable. With the `bash -c` one liners the argument needs a placeholder in front, since the first word after the command becomes `$0`:
 
 ```
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/mews-se/dietpi-factory/main/proxmox/create-dietpi-lxc.sh)" _ profiles/myprofile
