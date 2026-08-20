@@ -64,6 +64,8 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/mews-se/dietpi-factory/m
 
 Treat it as a reinstall: everything outside the base system is removed, including user home directories. Hardware model and Debian release are detected automatically, and the profile's SSH key is installed for root before the reboot. Make sure the profile carries your SSH key before converting a remote machine. `ASSUME_YES=1` skips the confirmation.
 
+The conversion purges whatever manages the network today, and the installer downloads its own packages only afterwards. A session running over a wireless interface that ifupdown does not manage is therefore refused outright: the run would die offline halfway and the machine would not come back. Convert those over Ethernet, or flash an image instead. On hardware that can use WiFi the script asks whether to install the WiFi stack; answer yes and the SSID, key and country code are carried over from NetworkManager, netplan or wpa_supplicant. `WIFI=0|1` answers up front.
+
 ## After deployment
 
 The machine finishes its first boot setup by itself and registers its hostname over DHCP. Log in as root or `dietpi` with the profile password, or with the profile's SSH key.
