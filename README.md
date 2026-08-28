@@ -6,7 +6,7 @@
 ![Deploys to: Proxmox](https://img.shields.io/badge/deploys%20to-Proxmox-E57000.svg?logo=proxmox&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-dietpi-factory sets up new [DietPi](https://dietpi.com/) machines unattended. Describe the setup once in a profile - hostname, network, SSH, software - and deploy it to Proxmox containers and VMs, flashable images for the Pi and bare metal, or a Debian system that is already running. The machine boots headless and configures itself, driven by [DietPi's own automation](https://github.com/MichaIng/DietPi).
+dietpi-factory sets up new [DietPi](https://github.com/MichaIng/DietPi) machines unattended. Describe the setup once in a profile - hostname, network, SSH, software - and deploy it to Proxmox containers and VMs, flashable images for the Pi and bare metal, or a Debian system that is already running. The machine boots headless and configures itself, driven by [DietPi's own automation](https://github.com/MichaIng/DietPi).
 
 ## Profiles
 
