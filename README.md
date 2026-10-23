@@ -83,7 +83,7 @@ scripts/bake-image.sh           bakes a profile into an official image
 vps/convert-to-dietpi.sh        converts a running Debian system to DietPi
 ```
 
-A generic DietPi LXC script pair in community-scripts layout lives in the [ProxmoxVED fork](https://github.com/mews-se/ProxmoxVED/tree/add-dietpi), aimed at an upstream PR.
+A generic DietPi LXC script pair, [ct/dietpi.sh](https://github.com/community-scripts/DevScripts/blob/main/ct/dietpi.sh) and [install/dietpi-install.sh](https://github.com/community-scripts/DevScripts/blob/main/install/dietpi-install.sh), is merged in the community-scripts development repo.
 
 ## Notes
 
