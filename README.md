@@ -14,7 +14,7 @@ dietpi-factory sets up new [DietPi](https://github.com/MichaIng/DietPi) machines
 ./factory.sh
 ```
 
-The wizard asks for hostname, network, SSH server and key, password, software picks and an optional own first boot script, and writes profiles/\<name\>/. Profiles can contain passwords and keys, so the directory is gitignored - copy it to wherever the deployment script runs.
+The wizard asks for hostname, timezone, keyboard and locale, network, SSH server and key, password, software picks, extra APT packages and an optional own first boot script, and writes profiles/\<name\>/. Profiles can contain passwords and keys, so the directory is gitignored; copy it to wherever the deployment script runs.
 
 Every deployment script takes a profile directory as first argument (second for bake-image.sh) or the PROFILE_DIR variable. With the `bash -c` one liners the argument needs a placeholder in front, since the first word after the command becomes `$0`:
 
@@ -52,7 +52,7 @@ Run as root on any Linux box:
 sudo scripts/bake-image.sh RPi5 profiles/myprofile
 ```
 
-The image argument is a name or search term matched against [dietpi.com/downloads/images](https://dietpi.com/downloads/images/), a URL or a local file. A partial match like `RPi5` opens a menu with the variants. Downloads are cached and verified in /var/cache/dietpi-factory and reused across runs. The result lands in build/ as a ready-to-flash .img for dd or Etcher. The output is published atomically; when two bakes write the same output name, the last one finished wins.
+The image argument is a name or search term matched against [dietpi.com/downloads/images](https://dietpi.com/downloads/images/), a URL or a local file. A partial match like `RPi5` opens a menu with the variants, no argument lists every image. Downloads are cached and verified in /var/cache/dietpi-factory and reused across runs. The result lands in build/ under the current directory as a ready-to-flash .img for dd or Etcher. A `dietpi-wifi.txt` in the profile directory is copied into the image too; the wizard writes none and turns WiFi off, so for a wireless Pi add the file and `AUTO_SETUP_NET_WIFI_ENABLED=1` by hand. The output is published atomically; when two bakes write the same output name, the last one finished wins.
 
 ## Convert an existing Debian system
 
@@ -62,9 +62,9 @@ Run on the target machine (VPS, VM or bare metal):
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/mews-se/dietpi-factory/main/vps/convert-to-dietpi.sh)"
 ```
 
-Treat it as a reinstall: everything outside the base system is removed, including user home directories. Hardware model and Debian release are detected automatically, and the profile's SSH key is installed for root before the reboot. Make sure the profile carries your SSH key before converting a remote machine. `ASSUME_YES=1` skips the confirmation.
+Treat it as a reinstall: everything outside the base system is removed, including user home directories, and the SSH host keys are reset. Hardware model and Debian release (bookworm, trixie or forky) are detected automatically, and the profile's SSH key is installed for root before the reboot. Make sure the profile carries your SSH key before converting a remote machine. `ASSUME_YES=1` skips the confirmation.
 
-The conversion purges whatever manages the network today, and the installer downloads its own packages only afterwards. A session running over a wireless interface that ifupdown does not manage is therefore refused outright: the run would die offline halfway and the machine would not come back. Convert those over Ethernet, or flash an image instead. On hardware that can use WiFi the script asks whether to install the WiFi stack; answer yes and the SSID, key and country code are carried over from NetworkManager, netplan or wpa_supplicant. `WIFI=0|1` answers up front.
+The conversion purges whatever manages the network today, and the installer downloads its own packages only afterwards. A session running over a wireless interface that ifupdown does not manage is therefore refused outright: the run would die offline halfway and the machine would not come back. Convert those over Ethernet, or flash an image instead. On hardware that can use WiFi the script asks whether to install the WiFi stack; answer yes and the SSID and key are carried over from NetworkManager, netplan or wpa_supplicant (a `dietpi-wifi.txt` in the profile wins), the country code from wpa_supplicant or `iw reg get`. `WIFI=0|1` answers up front.
 
 ## After deployment
 
@@ -89,7 +89,7 @@ A generic DietPi LXC script pair, [ct/dietpi.sh](https://github.com/community-sc
 
 DietPi reads /boot/dietpi.txt at first boot. With AUTO_SETUP_AUTOMATED=1 the whole setup runs unattended and /boot/Automation_Custom_Script.sh runs at the end when provided. See the [DietPi docs](https://dietpi.com/docs/usage/#how-to-do-an-automatic-base-installation-at-first-boot) and [dietpi.txt](https://github.com/MichaIng/DietPi/blob/master/dietpi.txt).
 
-A few things learned the hard way: dietpi-installer replaces dietpi.txt (the profile is merged in afterwards), it removes ifupdown2 without a replacement (ifupdown is reinstalled), DISTRO_TARGET must be preset when there is no tty, and the installer stamps the branch it was launched from as the permanent dietpi-update target - the scripts point it back at master afterwards, or updates would never arrive.
+A few things learned the hard way: dietpi-installer replaces dietpi.txt (the profile is merged in afterwards), installers before v10.7 remove ifupdown2 without a replacement (the scripts install ifupdown either way), DISTRO_TARGET must be preset when there is no tty, and the installer stamps the branch it was launched from as the permanent dietpi-update target, so the scripts point it back at master afterwards or updates would never arrive.
 
 ## Credits
 
